@@ -10,6 +10,9 @@ import tempfile
 import subprocess
 from azure.iot.device.aio import IoTHubDeviceClient
 
+from platformdirs import (
+    site_config_dir
+)
 from config_module.config_io import (
     get_config_file_path,
     get_agent_executable_path,
@@ -20,6 +23,8 @@ from config_module.host_info import build_host_tags
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+
+os_type = platform.system().lower()
 
 
 class ConnectionManager:
@@ -62,15 +67,27 @@ class ConnectionManager:
     async def execute_commands(self, commands, post_url=None, interpreter_override=None):
         interpreter = interpreter_override or self.get_default_interpreter()
         logging.info(f"Using interpreter: {interpreter}")
-
         output_message_data = None
 
         # Write commands to a temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".ps1" if "powershell" in interpreter.lower() else ".sh",
-                                         mode="w") as temp_file:
+        script_suffix = ".ps1" if "powershell" in interpreter.lower() else ".sh"
+        tmp_dir = None
+        if os_type == "windows":
+            config_dir = site_config_dir()
+            scripts_dir = os.path.join(config_dir, "\\RewstRemoteAgent\\scripts")
+            # scripts_dir = "C:\\Scripts"
+            if not os.path.exists(scripts_dir):
+                os.makedirs(scripts_dir)
+            tmp_dir = scripts_dir
+        with tempfile.NamedTemporaryFile(delete=False, suffix=script_suffix,
+                                         mode="w", dir=tmp_dir) as temp_file:
             if "powershell" in interpreter.lower():
                 # If PowerShell is used, decode the commands
                 decoded_commands = base64.b64decode(commands).decode('utf-16-le')
+                # Ensure TLS 1.2 configuration is set at the beginning of the command
+                tls_command = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12"
+                if tls_command not in decoded_commands:
+                    decoded_commands = tls_command + "\n" + decoded_commands
             else:
                 # For other interpreters, you might want to handle encoding differently
                 decoded_commands = base64.b64decode(commands).decode('utf-8')
@@ -102,6 +119,21 @@ class ConnectionManager:
             stdout, stderr = process.communicate()
             exit_code = process.returncode
             logging.info(f"Command completed with exit code {exit_code}")
+
+            if exit_code != 0 or stderr:
+                # Log and print error details
+                error_message = f"Script execution failed with exit code {exit_code}. Error: {stderr}"
+                logging.error(error_message)
+                print(error_message)  # Print to console
+                output_message_data = {
+                    'output': stdout,
+                    'error': error_message
+                }
+            else:
+                output_message_data = {
+                    'output': stdout,
+                    'error': ''
+                }
 
         except subprocess.CalledProcessError as e:
             logging.error(f"Command '{shell_command}' failed with error code {e.returncode}")
