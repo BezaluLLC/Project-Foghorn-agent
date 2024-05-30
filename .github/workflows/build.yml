@@ -112,12 +112,20 @@ jobs:
 #          ./dist/rewst_service_manager
 #          ./dist/rewst_agent_config
 
-    - name: Sign with SSL.com CodeSignTool
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        .\.github\workflows\ssl_com_sign_binaries.ps1 -username '${{ secrets.SSL_COM_USERNAME }}' -password '${{ secrets.SSL_COM_PASSWORD }}' -credentialId '${{ secrets.SSL_COM_CREDENTIAL_ID }}' -totpSecret '${{ secrets.SSL_COM_OTP }}'
-
+    - name: Sign files with Trusted Signing
+      uses: azure/trusted-signing-action@v0.3.19
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: https://eus.codesigning.azure.net/
+        trusted-signing-account-name: TSA-MainSigning-prod
+        certificate-profile-name: Foghorn-Agent
+        files-folder: ./dist
+        files-folder-filter: exe,dll
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
 
     - name: Generate Checksums (Windows)
       if: matrix.os == 'windows-latest'
